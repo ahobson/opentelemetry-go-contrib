@@ -16,15 +16,21 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/go-logr/logr/funcr"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/baggage"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
@@ -37,9 +43,20 @@ import (
 )
 
 func initTracer() (*sdktrace.TracerProvider, error) {
-	// Create stdout exporter to be able to retrieve
-	// the collected spans.
-	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	var exporter sdktrace.SpanExporter
+	var err error
+	if grpcEndpoint := os.Getenv("GRPC_ENDPOINT"); grpcEndpoint != "" {
+		fmt.Println("Using GRPC for traces")
+		spanClient := otlptracegrpc.NewClient(
+			otlptracegrpc.WithInsecure(),
+			otlptracegrpc.WithEndpoint(grpcEndpoint),
+		)
+		exporter, err = otlptrace.New(context.Background(), spanClient)
+	} else {
+		// Create stdout exporter to be able to retrieve
+		// the collected spans.
+		exporter, err = stdouttrace.New(stdouttrace.WithPrettyPrint())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +74,17 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 }
 
 func initMeter() (*sdkmetric.MeterProvider, error) {
-	exp, err := stdoutmetric.New()
+	var exp sdkmetric.Exporter
+	var err error
+	if grpcEndpoint := os.Getenv("GRPC_ENDPOINT"); grpcEndpoint != "" {
+		fmt.Println("Using GRPC for metrics")
+		exp, err = otlpmetricgrpc.New(context.Background(),
+			otlpmetricgrpc.WithInsecure(),
+			otlpmetricgrpc.WithEndpoint(grpcEndpoint),
+		)
+	} else {
+		exp, err = stdoutmetric.New()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +114,18 @@ func main() {
 			log.Printf("Error shutting down meter provider: %v", err)
 		}
 	}()
+
+	otel.SetLogger(funcr.New(func(prefix, args string) {
+		if prefix != "" {
+			log.Printf("%s: %s\n", prefix, args)
+		} else {
+			log.Println(args)
+		}
+	}, funcr.Options{}))
+
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		log.Printf("opentelemetry error: %s\n", err)
+	}))
 
 	uk := attribute.Key("username")
 
