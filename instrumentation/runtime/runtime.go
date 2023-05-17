@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/global"
 )
 
 // Runtime reports the work-in-progress conventional runtime metrics specified by OpenTelemetry.
@@ -86,7 +86,7 @@ func (o metricProviderOption) apply(c *config) {
 // newConfig computes a config from the supplied Options.
 func newConfig(opts ...Option) config {
 	c := config{
-		MeterProvider:               global.MeterProvider(),
+		MeterProvider:               otel.GetMeterProvider(),
 		MinimumReadMemStatsInterval: DefaultMinimumReadMemStatsInterval,
 	}
 	for _, opt := range opts {
